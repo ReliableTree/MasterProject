@@ -21,7 +21,6 @@ class Model(nn.Module):
         self.threshold = threshold
         self.epochs = 1
         self.set_mode(0)
-        #asd
 
     def set_mode(self, mode):
         if mode == 0:
