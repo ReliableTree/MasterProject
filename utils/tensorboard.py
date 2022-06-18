@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import tensorflow as tf
+import math
 
 
 class TBoardGraphs():
@@ -10,7 +11,12 @@ class TBoardGraphs():
             self.logdir              = os.path.join(data_path, "gboard/" + logname + "/")
             self.__tboard_train      = tf.summary.create_file_writer(self.logdir + "train/")
             self.__tboard_validation = tf.summary.create_file_writer(self.logdir + "validate/")
-        self.fig, self.ax = plt.subplots(3,3)
+        self.subplots = False
+
+    def set_subplots(self, dims):
+        num_rows = math.ceil((dims+1) / 3) 
+        self.fig, self.ax = plt.subplots(num_rows,3)
+        self.subplots = True
 
     def finishFigure(self, fig):
         fig.canvas.draw()
@@ -28,7 +34,9 @@ class TBoardGraphs():
 
     def plotTrajectory(self, y_true, y_pred, opt_y_pred=None,inpt = None, stepid= None, name = "Trajectory", save = False, \
             name_plot = None, path=None, tol_neg = None, tol_pos=None):
-
+        num_dims = len(y_true[0])
+        if not self.subplots:
+            self.set_subplots(dims=num_dims)
         trj_len      = y_true.shape[0]
         
         fig, ax = self.fig, self.ax
@@ -40,7 +48,7 @@ class TBoardGraphs():
         inpt = inpt.cpu().numpy()
         if opt_y_pred is not None:
             opt_y_pred = opt_y_pred.cpu().numpy
-        for sp in range(len(y_true[0])):
+        for sp in range(num_dims):
             idx = sp // 3
             idy = sp  % 3
             ax[idx,idy].clear()
@@ -50,7 +58,7 @@ class TBoardGraphs():
                 ax[idx,idy].plot(range(y_pred.shape[0]), neg_inpt[:,sp], alpha=0.75, color='orangered')
                 ax[idx,idy].plot(range(y_pred.shape[0]), pos_inpt[:,sp], alpha=0.75, color='orangered')
             ax[idx,idy].plot(range(trj_len), y_true[:,sp],   alpha=1.0, color='forestgreen')            
-            ax[idx,idy].plot(range(y_pred.shape[0]), y_pred[:,sp], alpha=0.75, color='mediumslateblue')
+            ax[idx,idy].plot(range(trj_len), y_pred[:,sp], alpha=0.75, color='mediumslateblue')
             if opt_y_pred is not None:
                 ax[idx,idy].plot(range(y_pred.shape[0]), opt_y_pred[:,sp], alpha=0.75, color='lightseagreen')
                 diff_vec = opt_y_pred - y_pred

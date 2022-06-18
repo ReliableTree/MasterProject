@@ -14,13 +14,10 @@ class TransformerModel(nn.Module):
             nhead = model_setup['nhead']
             d_hid = model_setup['d_hid']
             nlayers = model_setup['nlayers']
-            d_output = model_setup['d_output']
-            d_inpt = model_setup['d_inpt']
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=d_hid, dropout=dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layer=encoder_layers, num_layers=nlayers)
-        self.encoder = nn.Linear(d_inpt, d_model)
-        self.decoder = nn.Linear(d_model, d_output)
+        self.encoder = nn.Linear(d_model, d_model)
         self.d_model = d_model
 
 
@@ -37,7 +34,6 @@ class TransformerModel(nn.Module):
         src = self.encoder(src)* math.sqrt(self.d_model)
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src, src_mask)
-        #output = self.decoder(output)
         output = output.transpose(0,1)
 
         return output

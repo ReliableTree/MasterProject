@@ -1,24 +1,34 @@
 import torch
 
-def right_stack_obj_trj(task_embedding, sequence, seq_size):
+def stack_trj(task_embedding, sequence, seq_size):
     #inpt = N,L+1,D
+    result = make_inpt_seq(task_embedding=task_embedding, seq_size=seq_size)
     embed_size = task_embedding.size(-1)
-    result = torch.zeros(size=seq_size, device=task_embedding.device)
-    result[:,-1,:embed_size] = task_embedding.squeeze()
-    result[:,:-1,:sequence.size(-1)] = sequence
+    result[:,:-1,embed_size:embed_size+sequence.size(-1)] = sequence
     return result
 
 def make_inpt_seq(task_embedding, seq_size):
+    rep_task_embedding = task_embedding.unsqueeze(1).repeat([1,seq_size[1],1])
     embed_size = task_embedding.size(-1)
     result = torch.zeros(size=seq_size, device=task_embedding.device)
-    result[:,-1,:embed_size] = task_embedding.squeeze()
+    result[:,:,:embed_size] = rep_task_embedding
     return result
 
-def add_data_to_seq(data, seq=None):
+def add_data_to_seq(data, seq=None, length = 0):
+    inpt = pad_to_len(data, length).unsqueeze(0)
     if seq is None:
-        return data.unsqueeze(0)
+        return inpt
     else:
-        return torch.cat((seq, data.unsqueeze(0)), dim=0)
+        return torch.cat((seq,  inpt), dim=0)
+
+def pad_to_len(ten, length):
+    if length == 0:
+        return ten
+    else:
+        num_dim = len(ten.shape)
+        rep_arr = [1]*(num_dim-1)
+        result = torch.cat((ten, (ten[-1].unsqueeze(0).repeat(length - len(ten), *rep_arr))))
+        return result
 
 def calc_MSE(inpt, label):
     if torch.numel(inpt) == 0:

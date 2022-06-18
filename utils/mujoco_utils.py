@@ -1,12 +1,15 @@
 import multiprocessing
+import re
 import sys
 from collections import defaultdict
-from baselines.common.cmd_util import common_arg_parser, parse_unknown_args, make_vec_env, make_env
-from baselines.common.vec_env import VecFrameStack, VecNormalize, VecEnv
-from baselines.common.tf_util import get_session
-import tensorflow as tf
+
 import gym
-import re
+import tensorflow as tf
+from baselines.common.cmd_util import common_arg_parser, make_env, make_vec_env, parse_unknown_args
+from baselines.common.tf_util import get_session
+from baselines.common.vec_env import VecEnv, VecFrameStack, VecNormalize
+
+import numpy as np
 
 _game_envs = defaultdict(set)
 for env in gym.envs.registry.all():
@@ -27,8 +30,6 @@ _game_envs['retro'] = {
     'FinalFight-Snes',
     'SpaceInvaders-Snes',
 }
-
-print(_game_envs)
 
 def build_env(args):
     ncpu = multiprocessing.cpu_count()
@@ -63,6 +64,7 @@ def build_env(args):
             env = VecNormalize(env, use_tf=True)
 
     return env
+
 
 def get_env_type(args):
     env_id = args.env
@@ -104,13 +106,26 @@ def parse_cmdline_kwargs(args):
 
     return {k: parse(v) for k,v in parse_unknown_args(args).items()}
 
+
 def main(args):
     arg_parser = common_arg_parser()
     args, unknown_args = arg_parser.parse_known_args(args)
     extra_args = parse_cmdline_kwargs(unknown_args)
     env = build_env(args)
     print(env.reset())
+    action = np.array([0,0,0,0])
+    print(env.step(action))
+    '''print(env.step(actions=action))
+    print(env.step(actions=action))
+    print(env.observation_space)
+    print(env.action_space)'''
+
+
 
 if __name__ == '__main__':
-    main(sys.argv)
-    
+    #main(['mujoco_utils.py', '--env=FetchPickAndPlace-v1'])
+    env = gym.make(id='FetchPickAndPlace-v1')
+    a = env.reset()
+    action = np.array([0,0,0,0])
+    b = env.step(action=action)
+    print(a)
