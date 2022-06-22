@@ -67,8 +67,14 @@ class HERSimulation():
 
     def make_obsv(self, result):
         obs_dict = self.pars_obsv(result)
-        return(np.concatenate((obs_dict['hand_pos'], obs_dict['puck_pos'], obs_dict['puck_rot'], obs_dict['goal_pos']), axis=0))
+        return self.concat_obsv(obs_dict=obs_dict)
 
+    def concat_obsv(self, obs_dict):
+        '''print(f'hand_pos : {obs_dict["hand_pos"].shape}')
+        print(f'puck_pos : {obs_dict["puck_pos"].shape}')
+        print(f'puck_rot : {obs_dict["puck_rot"].shape}')
+        print(f'goal_pos : {obs_dict["goal_pos"].shape}')'''
+        return(np.concatenate((obs_dict['hand_pos'], obs_dict['puck_pos'], obs_dict['puck_rot'], obs_dict['goal_pos']), axis=0))
 
     def check_outpt_fct(self, env, outpt, render = False):
         #success, label
@@ -84,7 +90,9 @@ class HERSimulation():
             labels += [torch.tensor(action).unsqueeze(0)]
         labels = torch.cat([*labels], dim=0).to('cuda')
         success = torch.tensor(result[-1]['is_success']).type(torch.bool).to(device)
-        return success.unsqueeze(0), labels.unsqueeze(0)
+        po = self.pars_obsv(result[0])
+        goal = torch.tensor(po['goal_pos'])
+        return success.unsqueeze(0), labels.unsqueeze(0), goal.unsqueeze(0)
 
     def get_env(self, n, env_tag):
         seeds = torch.randint(0,int(1e10), [n])
@@ -95,25 +103,29 @@ class HERSimulation():
         env.seed(int(seed))
 
         result = env.reset()
+        obsv_dict = self.pars_obsv(result=result)
         obsv = self.make_obsv(result=result)
-        return torch.tensor(obsv, dtype=torch.float).to(device).reshape(1,-1), env
+        return torch.tensor(obsv, dtype=torch.float).to(device).reshape(1,-1), env, obsv_dict
 
     def get_success(self, policy, envs, device='cuda'):
         trajectories = []
         inpt_obs = []
+        obsv_dicts = []
         successes = []
         labels = []
+        goals = []
 
         for seed in envs:
-            inpt_obsv, env = self.get_simulation_input(seed, device=device)
+            inpt_obsv, env, obsv_dict = self.get_simulation_input(seed, device=device)
+            obsv_dicts += [obsv_dict]
             try:
                 policy = policy.to(device)
             except:
                 pass
             output_seq = policy.forward(inpt_obsv.unsqueeze(1))['gen_trj'].detach()
             #print(f'output_seq.shape: {output_seq.shape}')
-            success, label = self.check_outpt_fct(env=env, outpt=output_seq, render=False)
-
+            success, label, goal = self.check_outpt_fct(env=env, outpt=output_seq, render=False)
+            goals += [goal]
             trajectories += [output_seq]
             inpt_obs += [inpt_obsv]
             successes += [success.reshape(1,1)]
@@ -121,10 +133,23 @@ class HERSimulation():
             #print(f'labels shape: {label.shape}')
 
 
-        trajectories = torch.cat([*trajectories], dim=0).to('cuda')
-        inpt_obs = torch.cat([*inpt_obs], dim=0).to('cuda')
-        successes = torch.cat([*successes], dim=0).to('cuda')
-        labels = torch.cat([*labels], dim=0).to('cuda')
+        trajectories = torch.cat([*trajectories], dim=0)
+        inpt_obs = torch.cat([*inpt_obs], dim=0)
+        successes = torch.cat([*successes], dim=0).squeeze()
+        labels = torch.cat([*labels], dim=0)
 
+        for i in range((~successes).sum()):
+            HER_dict = obsv_dicts[i]
+            HER_dict['goal_pos'] = goals[i].squeeze()
+            new_inpt = torch.tensor(self.concat_obsv(HER_dict), dtype=torch.float).to('cuda')
+            inpt_obs = torch.cat((inpt_obs, new_inpt.unsqueeze(0)), dim=0)
+
+        trajectories = torch.cat((trajectories, trajectories[~successes]), dim=0).to('cuda')
+        labels = torch.cat((labels, labels[~successes]), dim=0).to('cuda')
+        successes = torch.cat((successes, ~successes[~successes]), dim=0).to('cuda')
+        '''print(f'trajectories: {trajectories.shape}')
+        print(f'labels: {labels.shape}')
+        print(f'inpt_obs: {inpt_obs.shape}')
+        print(f'successes: {successes.shape}')'''
 
         return trajectories, inpt_obs.unsqueeze(1), labels, successes.squeeze(), trajectories
