@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from requests import patch
 parent_path = str(Path(__file__).parent.absolute())
 parent_path += '/../../'
 sys.path.append(parent_path)
@@ -9,8 +10,11 @@ from torch.utils.data import DataLoader
 from yaml import load
 from MasterProject.model_src.model import Model
 from MasterProject.utils.utils import add_data_to_seq, calc_MSE
+import os
+
+
 class Network(torch.nn.Module):
-    def __init__(self, model_setup, data_sets, model_lr, critic_lr, batchsize, tboard, simulation, batch_size):
+    def __init__(self, model_setup, data_sets, model_lr, critic_lr, batchsize, tboard, simulation, batch_size, save_path, logname):
         super().__init__()
         self.tboard = tboard
         self.model_setup = model_setup
@@ -29,6 +33,9 @@ class Network(torch.nn.Module):
         self.simulation = simulation
         self.batch_size = batch_size
 
+        self.save_path = save_path + 'HerData/' + logname + '/'
+        self.best_opt_success = 0
+
         
     def init_model(self):
         self.model = Model(model_setup=self.model_setup, opt_lr=1, writer=self.tboard, iterations=2, threshold=self.threshold).to('cuda')
@@ -38,9 +45,7 @@ class Network(torch.nn.Module):
             print(f'obsv:{obsv.shape}')
             self.model.forward(obsv)
             break
-        self.optimizers = []
-        self.optimizers.append(torch.optim.AdamW(self.model.transformer.parameters(), lr=self.model_lr, weight_decay=1e-2))
-        self.optimizers.append(torch.optim.AdamW(self.model.critic_transformer.parameters(), lr=self.model_lr, weight_decay=1e-2))
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.model_lr, weight_decay=1e-4)
     
     
     def train(self, epochs):
@@ -56,9 +61,9 @@ class Network(torch.nn.Module):
             critic_loss = 2
             trj_loss = 1
             learning_loops = 0
-            while (trj_loss > 0.005)or (critic_acc < 1):
+            while (trj_loss > 1e-3):# or (critic_acc < 0.9):
                 debug_dict = self.run_epoch(train=True)
-                critic_acc = debug_dict['main critic acc']
+                #critic_acc = debug_dict['main critic acc']
                 trj_loss = debug_dict['main trj loss']
                 learning_loops += 1
 
@@ -73,24 +78,37 @@ class Network(torch.nn.Module):
             init_train = False
             self.model.eval()
             self.validate()
-            if (epoch+1) % 200 == 0:
-                self.model.set_mode(1)
+            if (epoch+1) % 1 == 0:
+                '''self.model.set_mode(1)
                 self.simulate(num_envs=20, prefix='optimisation ', add_data=True, train=True)
                 self.model.set_mode(0)
                 self.simulate(num_envs=20, prefix='iteration ', add_data=True, train=True)
-                if (epoch+1)%2000 == 0:
-                    self.model.set_mode(1)
-                    self.simulate(num_envs=200, prefix='optimisation ', add_data=True, train=False)
-                    self.model.set_mode(0)
-                    self.simulate(num_envs=200, prefix='iteration ', add_data=True, train=False)
+                if (epoch+1)%1 == 0:'''
+                self.model.set_mode(0)
+                self.simulate(num_envs=5, prefix='iteration ', add_data=True, train=False)
+                '''if debug_dict['success rate'] > self.best_opt_success:
+                    self.best_opt_success = debug_dict['success rate']
+                    self.model.epochs = int(1.3*self.model.epochs)
+                self.model.set_mode(0)
+                self.simulate(num_envs=50, prefix='iteration ', add_data=True, train=False)'''
+
 
             print(f'epoch: {epoch}')
+
+    def save(self):
+        os.makedirs(self.save_path, exist_ok=True)
+        torch.save(self.state_dict(), self.save_path + 'model')
+        torch.save(self.optimizer.state_dict(), self.save_path + 'optimizer')
+
+    def load(self):
+        self.load_state_dict(torch.load(self.save_path + 'model'))
+        self.optimizer.load_state_dict(torch.load(self.save_path + 'optimizer'))
 
     def run_epoch(self, train):
         losses = None
         trj_losses = None
-        critic_losses = None
-        critic_acc = None
+        #critic_losses = None
+        #critic_acc = None
         learn_critic = False
         if train:
             loader = self.train_loader
@@ -103,7 +121,7 @@ class Network(torch.nn.Module):
             if train:
                 self.global_step += 1
 
-            learn_critic = dataset.f_len > 0
+            #learn_critic = dataset.f_len > 0
 
 
             if learn_critic:
@@ -116,37 +134,35 @@ class Network(torch.nn.Module):
             loss, debug_dict = self.step(succ, train=train, learn_critic=learn_critic)
             self.tboard.write_tboard_scalar(debug_dict=debug_dict, train=train, step=self.global_step, prefix='succ ')
             trj_losses = add_data_to_seq(debug_dict['trj loss'].reshape(-1), trj_losses)
-            critic_losses = add_data_to_seq(debug_dict['critic loss'].reshape(-1), critic_losses)
-            critic_acc = add_data_to_seq(debug_dict['acc'].reshape(-1), critic_acc)
+            #critic_losses = add_data_to_seq(debug_dict['critic loss'].reshape(-1), critic_losses)
+            #critic_acc = add_data_to_seq(debug_dict['acc'].reshape(-1), critic_acc)
 
             losses = add_data_to_seq(loss.reshape(-1), losses)
         
-        if not learn_critic:
+        '''if not learn_critic:
             critic_losses = torch.zeros_like(critic_losses)
-            critic_acc = torch.ones_like(critic_acc)
+            critic_acc = torch.ones_like(critic_acc)'''
 
         debug_dict = {
             'main loss':losses.mean().detach(),
-            'main critic loss':critic_losses.mean().detach(),
+            #'main critic loss':critic_losses.mean().detach(),
             'main trj loss':trj_losses.mean().detach(),
-            'main critic acc': critic_acc.mean().detach()
+            #'main critic acc': critic_acc.mean().detach()
         }
 
         self.tboard.write_tboard_scalar(debug_dict=debug_dict, train=train, step=self.global_step)
         return debug_dict
 
     def backprop(self, loss):
-        for opt in self.optimizers:
-            opt.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
-        for opt in self.optimizers:
-            opt.step()
+        self.optimizer.step()
                     
     def step(self, inpt, train, learn_critic):
         obsv, label, succ = inpt
         output_seq = self.model.forward(task_embedding=obsv)
-        critic_scores = self.model.get_critic_score(task_embedding=obsv, last_seq=output_seq, detach=True)
-        loss, debug_dict = self.calculate_loss(result=(output_seq, critic_scores), label=label, succ=succ, learn_critic=learn_critic)
+       #critic_scores = self.model.get_critic_score(task_embedding=obsv, last_seq=output_seq, detach=True)
+        loss, debug_dict = self.calculate_loss(result=(output_seq, output_seq), label=label, succ=succ, learn_critic=learn_critic)
         if train:
             self.backprop(loss)
         return loss, debug_dict
@@ -154,20 +170,21 @@ class Network(torch.nn.Module):
     def calculate_loss(self, result, label, succ, learn_critic):
         output_seq, critic_score = result
         trj_loss = calc_MSE(output_seq[succ], label[succ])
-        critic_loss = calc_MSE(critic_score, succ)
-        pred_stats = self.get_prediction_stats(label=succ, pred=critic_score)
+        #critic_loss = calc_MSE(critic_score, succ)
+        #pred_stats = self.get_prediction_stats(label=succ, pred=critic_score)
         debug_dict = {
             'trj loss':trj_loss.clone().detach(),
-            'critic loss':critic_loss.clone().detach(),
-            'critic acc':pred_stats['acc']
+            #'critic loss':critic_loss.clone().detach(),
+            #'critic acc':pred_stats['acc']
         }
-        debug_dict.update(self.get_prediction_stats(label=succ, pred=critic_score))
+        #debug_dict.update(self.get_prediction_stats(label=succ, pred=critic_score))
         loss = trj_loss
-        if learn_critic:
-            loss = loss + critic_loss
+        #if learn_critic:
+        #    loss = loss + critic_loss
         return loss, debug_dict
         
     def get_prediction_stats(self, label, pred):
+        return None
         label = label.type(torch.bool)
         expected_success = (pred > 0.5).type(torch.bool)
         expected_fail = ~ expected_success
@@ -205,20 +222,21 @@ class Network(torch.nn.Module):
                 HER_trajectories, HER_inpt_obs, HER_labels, HER_success, HER_critic_scores = HER_result
                 gt_policy_success = True
 
-        debug_dict = self.get_prediction_stats(label=success, pred=critic_scores)
+        #debug_dict = self.get_prediction_stats(label=success, pred=critic_scores)
 
-        debug_dict.update({
+        debug_dict = {
             'success rate' : success.type(torch.float).mean(),
-                    })
+                    }
         self.tboard.write_tboard_scalar(debug_dict=debug_dict, train=train, step=self.global_step, prefix=prefix)
 
         if add_data:
-            num_exp = 5
-            self.train_ds.add_data(trajectories=labels[:num_exp], obsv=inpt_obs[:num_exp], success=success[:num_exp].type(torch.bool))
-            self.val_ds.add_data(trajectories=labels[num_exp:2*num_exp], obsv=inpt_obs[num_exp:2*num_exp], success=success[num_exp:2*num_exp].type(torch.bool))
+            num_exp = -0
+            success=success.type(torch.bool)
+            self.train_ds.add_data(trajectories=labels[success], obsv=inpt_obs[success], success=success.type(torch.bool)[success])
+            #self.val_ds.add_data(trajectories=labels[num_exp:2*num_exp], obsv=inpt_obs[num_exp:2*num_exp], success=success[num_exp:2*num_exp].type(torch.bool))
             
-            self.train_ds.add_data(trajectories=HER_labels[:num_exp], obsv=HER_inpt_obs[:num_exp], success=HER_success[:num_exp].type(torch.bool))
-            self.val_ds.add_data(trajectories=HER_labels[num_exp:2*num_exp], obsv=HER_inpt_obs[num_exp:2*num_exp], success=HER_success[num_exp:2*num_exp].type(torch.bool))
+            self.train_ds.add_data(trajectories=HER_labels, obsv=HER_inpt_obs, success=HER_success.type(torch.bool))
+            #self.val_ds.add_data(trajectories=HER_labels[num_exp:2*num_exp], obsv=HER_inpt_obs[num_exp:2*num_exp], success=HER_success[num_exp:2*num_exp].type(torch.bool))
             print('added data')
             print(f'data len: {self.train_ds.num_ele()}')
             print(f'len succ: {len(self.train_ds.success)}')
@@ -227,3 +245,4 @@ class Network(torch.nn.Module):
 
         self.tboard.plotTrajectory(y_true = labels[0], y_pred=trajectories[0], opt_y_pred=None,inpt = inpt_obs[0], stepid= self.global_step, name = "Trajectory", save = False, \
             name_plot = None, path=None, tol_neg = self.simulation.neg_tol, tol_pos=self.simulation.pos_tol)
+        #return debug_dict

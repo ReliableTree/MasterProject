@@ -1,6 +1,10 @@
+from cProfile import label
+from tkinter import Label
 import torch
 import numpy as np
 from utils.utils import add_data_to_seq
+from utils.utils import get_her_mask, get_input_mask
+from utils.simulation import HERSimulation
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self):
@@ -56,14 +60,13 @@ class HERDataset(Dataset):
 
         goals = None
         des_goal = None
-
         for sample in data['obs']:
             for step in sample:
                 obsv = torch.tensor(step['observation'])
-                traj = add_data_to_seq(obsv, traj, length=len(obsv) + 4)
+                traj = add_data_to_seq(obsv[mask], traj, length=len(obsv[mask]) + 4)
                 traj[:,-4:] = 0
                 if des_goal is None:
-                    des_goal = torch.cat((obsv, torch.tensor(step['desired_goal'])))
+                    des_goal = torch.cat((obsv[inpt_mask], torch.tensor(step['desired_goal'])))
 
             trajectories = add_data_to_seq(traj, trajectories, length=max_len)
             traj = None
@@ -112,3 +115,60 @@ class ToyDataset(Dataset):
         self.f_obsv = obsv[success==0].to(device)
         self.fail = success[success==0].to(device)
         self.set_len()
+
+class HERDatasetBaseline(Dataset):
+    def __init__(self, path, device, num_ele=-0):
+        super().__init__()
+        self.load_data(path=path, device=device, num_ele=num_ele)
+
+    def load_data(self, path, device, num_ele):
+        hs = HERSimulation()
+        np_data = np.load(path, allow_pickle=True)
+        max_len = 0
+        for sample in np_data["obs"]:
+            if len(sample) > max_len:
+                max_len = len(sample)
+
+        label = None
+        labels = None
+
+        data = None
+        datas = None
+
+        for sample in np_data['obs']:
+            for step in sample:
+                obsv = torch.tensor(hs.make_obsv(step), dtype=torch.float)
+                label = add_data_to_seq(obsv, label, length=len(obsv))
+            labels = add_data_to_seq(label, labels, length=max_len)
+            label = None
+                
+        for i, sample in enumerate(np_data['acs']):
+            for j, step in enumerate(sample):
+                step[-1] = step[-1]*10
+                action = torch.tensor(step, dtype=torch.float)
+                data = add_data_to_seq(action, data, len(action))
+            datas = add_data_to_seq(data, datas, length=max_len)
+            data = None
+        self.label = datas
+        self.data = labels
+
+    def add_data(self, data, label):
+        print(f'data: {data.shape}')
+        print(f'label: {label.shape}')
+        print(f'self.data: {self.data.shape}')
+        print(f'self.label: {self.label.shape}')
+
+        if data.size(1) == 1:
+            data = data.repeat([1,self.data.size(1), 1])
+        if len(data.shape) == 2:
+            data = data.unsqueeze(1).repeat([1,self.data.size(1), 1])
+        self.data = torch.cat((self.data.to('cuda'), data.to('cuda')), dim=0)
+        self.label = torch.cat((self.label.to('cuda'), label.to('cuda')), dim=0)
+
+    def __getitem__(self, index):
+            'Generates one sample of data'
+            return self.data[index], self.label[index]
+
+    def __len__(self):
+        return len(self.data)
+        

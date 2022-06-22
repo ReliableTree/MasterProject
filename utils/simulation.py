@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 import torch
 from torch.utils.data import DataLoader
 from zmq import device
+import numpy as np
 
 class ToySimulation():
     def __init__(self, neg_tol, pos_tol, check_outpt_fct, dataset, result_size, window = 9) -> None:
@@ -52,6 +53,28 @@ class HERSimulation():
     def __init__(self) -> None:
         self.neg_tol = None
         self.pos_tol = None
+        self.window = 0
+
+    def pars_obsv(self, result):
+        obsv = result['observation']
+        goal = result['desired_goal']
+        parsed = {}
+        parsed['hand_pos'] = obsv[:3]
+        parsed['puck_pos'] = obsv[3:6]
+        parsed['puck_rot'] = obsv[9:13]
+        parsed['goal_pos'] = goal
+        return parsed
+
+    def make_obsv(self, result):
+        obs_dict = self.pars_obsv(result)
+        return self.concat_obsv(obs_dict=obs_dict)
+
+    def concat_obsv(self, obs_dict):
+        '''print(f'hand_pos : {obs_dict["hand_pos"].shape}')
+        print(f'puck_pos : {obs_dict["puck_pos"].shape}')
+        print(f'puck_rot : {obs_dict["puck_rot"].shape}')
+        print(f'goal_pos : {obs_dict["goal_pos"].shape}')'''
+        return(np.concatenate((obs_dict['hand_pos'], obs_dict['puck_pos'], obs_dict['puck_rot'], obs_dict['goal_pos']), axis=0))
 
     def check_outpt_fct(self, env, outpt, render = False):
         #success, label
@@ -60,17 +83,18 @@ class HERSimulation():
         outpt = outpt.cpu().numpy()
         for pred in outpt[0]:
             #pred = 29
-            action = pred[-4:]
+            action = pred
+            env_action = np.copy(action)
+            env_action[-1] = env_action[-1]/10
             result = env.step(action)
-            obsv = torch.tensor(result[0]['observation']) 
-            label = torch.cat((obsv.unsqueeze(0), torch.tensor(action).unsqueeze(0)), dim=-1)
-            labels += [label]
-
-        labels = torch.cat([*labels], dim=0).to(device)
+            labels += [torch.tensor(action).unsqueeze(0)]
+        labels = torch.cat([*labels], dim=0).to('cuda')
         success = torch.tensor(result[-1]['is_success']).type(torch.bool).to(device)
-        return success.unsqueeze(0), labels.unsqueeze(0)
+        po = self.pars_obsv(result[0])
+        goal = torch.tensor(po['goal_pos'])
+        return success.unsqueeze(0), labels.unsqueeze(0), goal.unsqueeze(0)
 
-    def get_seeds(self, n):
+    def get_env(self, n, env_tag):
         seeds = torch.randint(0,int(1e10), [n])
         return seeds
 
@@ -79,66 +103,49 @@ class HERSimulation():
         env.seed(int(seed))
 
         result = env.reset()
-        obsv = torch.tensor(result['observation']) 
-        goal = torch.tensor(result['desired_goal'])
-        #print('shapes:')
-        #print(obsv.shape)
-        #print(goal.shape)
-        inpt_obsv = torch.cat((obsv.unsqueeze(0), goal.unsqueeze(0)), dim=-1).to(device)
-        #print(inpt_obsv.shape)
-        return inpt_obsv, env
+        obsv_dict = self.pars_obsv(result=result)
+        obsv = self.make_obsv(result=result)
+        return torch.tensor(obsv).to(device).reshape(1,-1), env, obsv_dict
 
-    def simulate(self, policy, seeds, device):
+    def get_success(self, policy, envs, device='cuda'):
         trajectories = []
         inpt_obs = []
+        obsv_dicts = []
         successes = []
         labels = []
-        critic_scores = []
+        goals = []
 
-        HER_trajectories = []
-        HER_inpt_obs = []
-        HER_successes = []
-        HER_labels = []
-        HER_critic_scores = []
-
-        for seed in seeds:
-            inpt_obsv, env = self.get_simulation_input(seed, device=device)
-            output_seq = policy.forward(task_embedding=inpt_obsv).detach()
+        for seed in envs:
+            inpt_obsv, env, obsv_dict = self.get_simulation_input(seed, device=device)
+            obsv_dicts += [obsv_dict]
+            try:
+                policy = policy.to(device)
+            except:
+                pass
+            output_seq = policy.forward(inpt_obsv.unsqueeze(1))['gen_trj'].detach()
             #print(f'output_seq.shape: {output_seq.shape}')
-            critic_score = policy.get_critic_score(task_embedding=inpt_obsv, last_seq=output_seq, detach=True).detach()
-            success, label = self.check_outpt_fct(env=env, outpt=output_seq, render=False)
-
+            success, label, goal = self.check_outpt_fct(env=env, outpt=output_seq, render=False)
+            goals += [goal]
             trajectories += [output_seq]
             inpt_obs += [inpt_obsv]
             successes += [success.reshape(1,1)]
             labels += [label]
-            critic_scores += [critic_score.reshape(1,1)]
             #print(f'labels shape: {label.shape}')
-
-            if not success.reshape(1)[0]:
-                HER_Observation = inpt_obsv.clone()
-                HER_Observation[:,-3:] = label[:,-1,3:6]
-                HER_label = label.clone()
-                HER_success = torch.ones_like(success).type(torch.bool)
-                HER_critic_score = policy.get_critic_score(task_embedding=HER_Observation, last_seq=label, detach=True).detach()
-                HER_trajectories += [output_seq]
-                HER_inpt_obs += [HER_Observation]
-                HER_successes += [HER_success.reshape(1,1)]
-                HER_labels += [HER_label]
-                HER_critic_scores += [HER_critic_score.reshape(1,1)]
 
 
         trajectories = torch.cat([*trajectories], dim=0)
         inpt_obs = torch.cat([*inpt_obs], dim=0)
-        successes = torch.cat([*successes], dim=0)
+        successes = torch.cat([*successes], dim=0).squeeze()
         labels = torch.cat([*labels], dim=0)
-        critic_scores = torch.cat([*critic_scores], dim=0)
 
-        HER_trajectories = torch.cat([*HER_trajectories], dim=0)
-        HER_inpt_obs = torch.cat([*HER_inpt_obs], dim=0)
-        HER_successes = torch.cat([*HER_successes], dim=0)
-        HER_labels = torch.cat([*HER_labels], dim=0)
-        HER_critic_scores = torch.cat([*HER_critic_scores], dim=0)
+        '''for i in range((~successes).sum()):
+            HER_dict = obsv_dicts[i]
+            HER_dict['goal_pos'] = goals[i].squeeze()
+            new_inpt = torch.tensor(self.concat_obsv(HER_dict)).to('cuda')
+            inpt_obs = torch.cat((inpt_obs, new_inpt.unsqueeze(0)), dim=0)
 
-        return (trajectories, inpt_obs, labels, successes.squeeze(), critic_scores), \
-            (HER_trajectories, HER_inpt_obs, HER_labels, HER_successes.squeeze(), HER_critic_scores)
+        trajectories = torch.cat((trajectories, trajectories[~successes]), dim=0).to('cuda')
+        labels = torch.cat((labels, labels[~successes]), dim=0).to('cuda')
+        successes = torch.cat((successes, ~successes[~successes]), dim=0).to('cuda')'''
+
+        return trajectories, inpt_obs, labels, successes, trajectories

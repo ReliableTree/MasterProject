@@ -25,9 +25,8 @@ class Model(nn.Module):
         self.trj_len = model_setup['seq_len']
         self.writer = writer
         self.iterations = iterations
-        self.memory = {}
         self.threshold = threshold
-        self.epochs = 50
+        self.epochs = 10
         self.set_mode(0)
 
     def set_mode(self, mode):
@@ -38,27 +37,28 @@ class Model(nn.Module):
 
     def iter_forward(self, task_embedding):
         trj_size = self.get_trj_size(task_embedding=task_embedding)
-        last_seq = make_inpt_seq(task_embedding=task_embedding, seq_size=trj_size)
+        #last_seq = make_inpt_seq(task_embedding=task_embedding, seq_size=trj_size)
+        last_seq = torch.zeros(trj_size, device=task_embedding.device)
         for it in range(self.iterations):
             last_seq = last_seq.detach()
             last_seq = self.get_trj(task_embedding=task_embedding, last_seq=last_seq)
+
         return last_seq
 
     def get_trj(self, task_embedding, last_seq):
         seq_transformer = self.get_seq_trans(task_embedding=task_embedding, last_seq=last_seq)
-        task_embedding_size = task_embedding.size(-1)
-        last_seq = self.decode(seq_transformer=seq_transformer, task_embedding_size=task_embedding_size)
+        #task_embedding_size = task_embedding.size(-1)
+        last_seq = self.decode(seq_transformer=seq_transformer)
         return last_seq
 
     def get_seq_trans(self, task_embedding, last_seq):
-        inpt_seq_size = self.get_seq_size(task_embedding=task_embedding)
-        inpt_seq = stack_trj(task_embedding, last_seq, inpt_seq_size)
+        inpt_seq = stack_trj(task_embedding, last_seq)
         seq_transformer = self.transformer(inpt_seq)
         return seq_transformer
 
     def get_seq_crit(self, task_embedding, last_seq):
         inpt_seq_size = self.get_seq_size(task_embedding=task_embedding)
-        inpt_seq = stack_trj(task_embedding, last_seq, inpt_seq_size)
+        inpt_seq = stack_trj(task_embedding, last_seq)
         seq_transformer = self.critic_transformer(inpt_seq)
         return seq_transformer
 
@@ -76,8 +76,8 @@ class Model(nn.Module):
         critic_score = self.get_critic(seq_transformer=seq_trans)
         return critic_score
 
-    def decode(self, seq_transformer, task_embedding_size):
-        output_seq = seq_transformer[:,:-1,task_embedding_size:task_embedding_size+self.model_setup['decoder']['d_output']] #N,l,d_out
+    def decode(self, seq_transformer):
+        output_seq = seq_transformer[:,:,:self.model_setup['decoder']['d_output']] #N,l,d_out
         return output_seq
 
     def get_critic(self, seq_transformer):

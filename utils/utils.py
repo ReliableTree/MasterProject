@@ -1,10 +1,11 @@
 import torch
 
-def stack_trj(task_embedding, sequence, seq_size):
+def stack_trj(task_embedding, sequence):
     #inpt = N,L+1,D
+    seq_size = [task_embedding.size(0), sequence.size(1), sequence.size(-1)+task_embedding.size(-1)]
     result = make_inpt_seq(task_embedding=task_embedding, seq_size=seq_size)
     embed_size = task_embedding.size(-1)
-    result[:,:-1,embed_size:embed_size+sequence.size(-1)] = sequence
+    result[:,:,embed_size:embed_size+sequence.size(-1)] = sequence
     return result
 
 def make_inpt_seq(task_embedding, seq_size):
@@ -16,7 +17,7 @@ def make_inpt_seq(task_embedding, seq_size):
 
 def add_data_to_seq(data, seq=None, length = 0):
     inpt = pad_to_len(data, length).unsqueeze(0)
-    if seq is None:
+    if (seq is None) or (len(seq) == 0):
         return inpt
     else:
         return torch.cat((seq,  inpt), dim=0)
@@ -24,6 +25,8 @@ def add_data_to_seq(data, seq=None, length = 0):
 def pad_to_len(ten, length):
     if length == 0:
         return ten
+    elif len(ten) == 0:
+        return torch.zeros([length])
     else:
         num_dim = len(ten.shape)
         rep_arr = [1]*(num_dim-1)
@@ -79,3 +82,14 @@ def make_sliding_tol_dim(label, window = 9):
     label_ind = label_repeated[ind]
     result = label_ind.max(dim=-1)[0], label_ind.min(dim=-1)[0]
     return result
+
+def get_her_mask(device):
+    mask = torch.zeros([25], dtype=torch.bool, device=device)
+    #mask[:6] = 1
+    #mask[9] = 1
+    return mask
+
+def get_input_mask(device):
+    mask = torch.zeros([25], dtype=torch.bool, device=device)
+    mask[:6] = 1
+    return mask

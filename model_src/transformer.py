@@ -13,11 +13,12 @@ class TransformerModel(nn.Module):
             d_model = model_setup['d_model']
             nhead = model_setup['nhead']
             d_hid = model_setup['d_hid']
+            d_inpt = model_setup['d_inpt']
             nlayers = model_setup['nlayers']
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=d_hid, dropout=dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layer=encoder_layers, num_layers=nlayers)
-        self.encoder = nn.Linear(d_model, d_model)
+        self.encoder = nn.Linear(d_inpt, d_model)
         self.d_model = d_model
 
 
