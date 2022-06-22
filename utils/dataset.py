@@ -149,8 +149,8 @@ class HERDatasetBaseline(Dataset):
                 data = add_data_to_seq(action, data, len(action))
             datas = add_data_to_seq(data, datas, length=max_len)
             data = None
-        self.label = datas
-        self.data = labels
+        self.label = datas.to(device)
+        self.data = labels.to(device)
 
     def add_data(self, data, label):
         print(f'data: {data.shape}')
