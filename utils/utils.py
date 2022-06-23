@@ -1,4 +1,7 @@
+from types import NoneType
+from unittest import result
 import torch
+import numpy as np
 
 def stack_trj(task_embedding, sequence):
     #inpt = N,L+1,D
@@ -14,6 +17,40 @@ def make_inpt_seq(task_embedding, seq_size):
     result = torch.zeros(size=seq_size, device=task_embedding.device)
     result[:,:,:embed_size] = rep_task_embedding
     return result
+
+def pars_obsv(result):
+    obsv = result['observation']
+    goal = result['desired_goal']
+    parsed = {}
+    parsed['hand_pos'] = obsv[:3]
+    parsed['puck_pos'] = obsv[3:6]
+    parsed['puck_rot'] = obsv[9:13]
+    parsed['goal_pos'] = goal
+    return parsed
+
+def make_obsv(result):
+    obs_dict = pars_obsv(result)
+    return concat_obsv(obs_dict=obs_dict)
+
+def concat_obsv(obs_dict):
+    return(np.concatenate((obs_dict['hand_pos'], obs_dict['puck_pos'], obs_dict['puck_rot'], obs_dict['goal_pos']), axis=0))
+
+def make_obsv_seq(obsvs, device='cuda'):
+    result = None
+    for obsv in obsvs:
+        result = append_obsv_seq(obsv, result, device)
+    return result
+
+def append_obsv_seq(obsv, seq=None, device = 'cuda'):
+    result = make_obsv(obsv)
+    result = torch.tensor(result, dtype=torch.float, device=device).unsqueeze(0)
+    if seq is None:
+        seq = result
+    else:
+        seq = torch.cat((seq, result), dim=0)
+    return seq
+
+
 
 def add_data_to_seq(data, seq=None, length = 0):
     inpt = pad_to_len(data, length).unsqueeze(0)
