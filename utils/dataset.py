@@ -2,7 +2,8 @@ from cProfile import label
 from tkinter import Label
 import torch
 import numpy as np
-from utils.utils import append_obsv_seq, add_data_to_seq
+from utils.utils import add_data_to_seq
+from utils.utils import get_her_mask, get_input_mask
 from utils.simulation import HERSimulation
 
 class Dataset(torch.utils.data.Dataset):
@@ -54,27 +55,40 @@ class HERDataset(Dataset):
             if len(sample) > max_len:
                 max_len = len(sample)
 
-        obsvs = None
-        labels = []
+        trajectories = None
+        traj = None
+
+        goals = None
+        des_goal = None
         for sample in data['obs']:
             for step in sample:
-                obsvs = append_obsv_seq(step, obsvs, device=device)
+                obsv = torch.tensor(step['observation'])
+                traj = add_data_to_seq(obsv[mask], traj, length=len(obsv[mask]) + 4)
+                traj[:,-4:] = 0
+                if des_goal is None:
+                    des_goal = torch.cat((obsv[inpt_mask], torch.tensor(step['desired_goal'])))
+
+            trajectories = add_data_to_seq(traj, trajectories, length=max_len)
+            traj = None
+
+            goals = add_data_to_seq(des_goal, goals)
+            des_goal = None
 
         for i, sample in enumerate(data['acs']):
             for j, step in enumerate(sample):
-                action = torch.tensor(step).unsqueeze(0)
-                labels += [action.to(device)]
+                action = torch.tensor(step)
+                trajectories[i,j+1,-4:] = action
 
         #trajectories = batch x seq_len x [obsv[25], acts[26:29]]
-        labels = torch.cat([*labels], dim=0)
-        success = torch.ones(obsvs.size(0), dtype=torch.bool)
+        
+        success = torch.ones(trajectories.size(0), dtype=torch.bool)
 
-        self.s_labels = labels[success==1].to(device)[-num_ele:]
-        self.s_obsv = obsvs[success==1].to(device)[-num_ele:]
+        self.s_trajectories = trajectories[success==1].to(device)[-num_ele:]
+        self.s_obsv = goals[success==1].to(device)[-num_ele:]
         self.success = success[success==1].to(device)[-num_ele:]
 
-        self.f_labels = labels[success==0].to(device)
-        self.f_obsv = obsvs[success==0].to(device)
+        self.f_trajectories = trajectories[success==0].to(device)
+        self.f_obsv = goals[success==0].to(device)
         self.fail = success[success==0].to(device)
         self.set_len()
         
@@ -110,7 +124,7 @@ class HERDatasetBaseline(Dataset):
     def load_data(self, path, device, num_ele):
         hs = HERSimulation()
         np_data = np.load(path, allow_pickle=True)
-        max_len = 65
+        max_len = 0
         for sample in np_data["obs"]:
             if len(sample) > max_len:
                 max_len = len(sample)
@@ -135,8 +149,8 @@ class HERDatasetBaseline(Dataset):
                 data = add_data_to_seq(action, data, len(action))
             datas = add_data_to_seq(data, datas, length=max_len)
             data = None
-        self.label = datas.to(device)
-        self.data = labels.to(device)
+        self.label = datas[num_ele:2*num_ele].to(device)
+        self.data = labels[num_ele:2*num_ele].to(device)
 
     def add_data(self, data, label):
         print(f'data: {data.shape}')
