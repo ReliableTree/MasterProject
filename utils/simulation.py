@@ -99,7 +99,7 @@ class HERSimulation():
         return seeds
 
     def get_simulation_input(self, seed, device):
-        env = gym.make('FetchPickAndPlace-v1')
+        env = gym.make('FetchPickAndPlace-v2')
         env.seed(int(seed))
 
         result = env.reset()
@@ -136,8 +136,9 @@ class HERSimulation():
         trajectories = torch.cat([*trajectories], dim=0)
         inpt_obs = torch.cat([*inpt_obs], dim=0)
         successes = torch.cat([*successes], dim=0).squeeze()
+        achieved_succ = successes.clone()
         labels = torch.cat([*labels], dim=0)
-        if her and False:
+        if her:
             for i in range((~successes).sum()):
                 HER_dict = obsv_dicts[i]
                 HER_dict['goal_pos'] = goals[i].squeeze()
@@ -152,4 +153,4 @@ class HERSimulation():
         print(f'inpt_obs: {inpt_obs.shape}')
         print(f'successes: {successes.shape}')'''
 
-        return trajectories, inpt_obs.unsqueeze(1), labels, successes.squeeze(), trajectories
+        return trajectories, inpt_obs.unsqueeze(1), labels, successes.squeeze(), achieved_succ

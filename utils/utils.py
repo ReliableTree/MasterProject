@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+from torch import Tensor
+import scipy.stats
 
 def stack_trj(task_embedding, sequence):
     #inpt = N,L+1,D
@@ -128,3 +130,52 @@ def get_input_mask(device):
     mask = torch.zeros([25], dtype=torch.bool, device=device)
     mask[:6] = 1
     return mask
+
+class ConvergenceDetector():
+    def __init__(self, setup, set_meta) -> None:
+        self.loss_history = None
+        self.mean_loss_history = []
+        self.setup = setup
+        self.set_meta = set_meta
+        self.num_convs = 0
+
+    def add_loss(self, loss, ):
+        if self.loss_history is None:
+            self.loss_history = loss
+        else:
+            self.loss_history = torch.cat((self.loss_history, loss))
+        conv_detected = self.detect_convergence()
+        if conv_detected:
+            if self.num_convs == 0:
+                self.setup()
+                self.set_meta()
+                self.reset_history()
+            self.num_convs += 1
+        return self.num_convs, conv_detected
+
+    def reset_history(self):
+        self.loss_history = None
+        self.mean_loss_history = []
+
+    def torch_compute_confidence_interval(self, data: Tensor,
+                                           confidence: float = 0.95
+                                           ) -> Tensor:
+        """
+        Computes the confidence interval for a given survey of a data set.
+        """
+        n = len(data)
+        mean: Tensor = data.mean()
+        # se: Tensor = scipy.stats.sem(data)  # compute standard error
+        # se, mean: Tensor = torch.std_mean(data, unbiased=True)  # compute standard error
+        se: Tensor = data.std(unbiased=True) / (n**0.5)
+        t_p: float = float(scipy.stats.t.ppf((1 + confidence) / 2., n - 1))
+        ci = t_p * se
+        return mean, ci
+
+    def detect_convergence(self):
+        if len(self.loss_history) > 3000:
+            resent_interval = self.torch_compute_confidence_interval(data=self.loss_history[-300:], confidence=0.02)
+            whole_interval = self.torch_compute_confidence_interval(data=self.loss_history[-3000:], confidence=0.02)
+            return whole_interval[0] - whole_interval[1] > resent_interval[0]
+        else:
+            return False
