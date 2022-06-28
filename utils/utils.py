@@ -132,12 +132,16 @@ def get_input_mask(device):
     return mask
 
 class ConvergenceDetector():
-    def __init__(self, setup, set_meta) -> None:
+    def __init__(self, setup, set_meta, writer, name, conf, interval) -> None:
         self.loss_history = None
         self.mean_loss_history = []
         self.setup = setup
         self.set_meta = set_meta
         self.num_convs = 0
+        self.writer = writer
+        self.name = name
+        self.conf = conf
+        self.interval = interval
 
     def add_loss(self, loss, ):
         if self.loss_history is None:
@@ -157,9 +161,7 @@ class ConvergenceDetector():
         self.loss_history = None
         self.mean_loss_history = []
 
-    def torch_compute_confidence_interval(self, data: Tensor,
-                                           confidence: float = 0.95
-                                           ) -> Tensor:
+    def torch_compute_confidence_interval(self, data: Tensor) -> Tensor:
         """
         Computes the confidence interval for a given survey of a data set.
         """
@@ -168,14 +170,22 @@ class ConvergenceDetector():
         # se: Tensor = scipy.stats.sem(data)  # compute standard error
         # se, mean: Tensor = torch.std_mean(data, unbiased=True)  # compute standard error
         se: Tensor = data.std(unbiased=True) / (n**0.5)
-        t_p: float = float(scipy.stats.t.ppf((1 + confidence) / 2., n - 1))
+        t_p: float = float(scipy.stats.t.ppf((1 + self.conf) / 2., n - 1))
         ci = t_p * se
         return mean, ci
 
     def detect_convergence(self):
-        if len(self.loss_history) > 3000:
-            resent_interval = self.torch_compute_confidence_interval(data=self.loss_history[-300:], confidence=0.02)
-            whole_interval = self.torch_compute_confidence_interval(data=self.loss_history[-3000:], confidence=0.02)
-            return whole_interval[0] - whole_interval[1] > resent_interval[0]
+        resent_interval = self.torch_compute_confidence_interval(data=self.loss_history[-self.interval:])
+        whole_interval = self.torch_compute_confidence_interval(data=self.loss_history[-(10*self.interval):])
+        debug_dict = {
+            'resent interval ' + self.name: resent_interval[0],
+            'whole interval ' + self.name: whole_interval[0],
+            'uncertainty whole: ' + self.name: whole_interval[1]
+        }
+        if self.writer is not None:
+            self.writer(debug_dict=debug_dict, train=False)
+        conv = whole_interval[0] - whole_interval[1] < resent_interval[0]
+        if len(self.loss_history) > 10*self.interval:
+            return conv
         else:
             return False
