@@ -177,14 +177,21 @@ class ConvergenceDetector():
     def detect_convergence(self):
         resent_interval = self.torch_compute_confidence_interval(data=self.loss_history[-self.interval:])
         whole_interval = self.torch_compute_confidence_interval(data=self.loss_history[-(10*self.interval):])
+        conv = whole_interval[0] - whole_interval[1] < resent_interval[0]
+
         debug_dict = {
             'resent interval ' + self.name: resent_interval[0],
-            'whole interval ' + self.name: whole_interval[0],
-            'uncertainty whole: ' + self.name: whole_interval[1]
+            're uncertainty whole: ' + self.name: whole_interval[1]
+        }
+        if self.writer is not None:
+            self.writer(debug_dict=debug_dict, train=True)
+        debug_dict = {
+            'resent interval ' + self.name: whole_interval[0],
+            're diff' + self.name: resent_interval[0] - (whole_interval[0] - whole_interval[1]),
+            'reset' + self.name: torch.tensor((len(self.loss_history) > 10*self.interval) and conv)
         }
         if self.writer is not None:
             self.writer(debug_dict=debug_dict, train=False)
-        conv = whole_interval[0] - whole_interval[1] < resent_interval[0]
         if len(self.loss_history) > 10*self.interval:
             return conv
         else:
