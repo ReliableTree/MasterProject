@@ -154,6 +154,7 @@ class ConvergenceDetector():
                 self.setup()
                 self.set_meta()
                 self.reset_history()
+                self.interval = int(1.3 * self.interval)
             self.num_convs += 1
         return self.num_convs, conv_detected
 
