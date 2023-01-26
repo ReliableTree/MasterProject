@@ -129,6 +129,8 @@ class HERDatasetBaseline(Dataset):
             if len(sample) > max_len:
                 max_len = len(sample)
 
+        print(f'max length: {max_len}')
+
         label = None
         labels = None
 
@@ -151,6 +153,10 @@ class HERDatasetBaseline(Dataset):
             data = None
         self.label = datas[num_ele:2*num_ele].to(device)
         self.data = labels[num_ele:2*num_ele].to(device)
+        print(f'self.label: {self.label.shape}')
+        print(self.label[...,:])
+        print(f'self.data: {self.data.shape}')
+        print(self.data[...,:])
 
     def add_data(self, data, label):
         print(f'data: {data.shape}')
